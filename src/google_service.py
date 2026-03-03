@@ -1,0 +1,214 @@
+"""Google Calendar & Tasks API service layer.
+
+Provides high-level functions to fetch/create events and tasks,
+with automatic fallback to the local SQLite cache on network errors.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta
+from typing import Any
+
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+from src.auth import get_credentials
+from src import cache
+
+log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Service helpers
+# ---------------------------------------------------------------------------
+
+def _calendar_service():
+    return build("calendar", "v3", credentials=get_credentials())
+
+
+def _tasks_service():
+    return build("tasks", "v1", credentials=get_credentials())
+
+
+# ---------------------------------------------------------------------------
+# Read — Fetch
+# ---------------------------------------------------------------------------
+
+def fetch_month_events(year: int, month: int) -> list[dict[str, Any]]:
+    """Fetch calendar events for the given month from the Google Calendar API.
+
+    Falls back to local cache on any network / API error.
+    """
+    time_min = datetime(year, month, 1).isoformat() + "Z"
+    if month == 12:
+        time_max = datetime(year + 1, 1, 1).isoformat() + "Z"
+    else:
+        time_max = datetime(year, month + 1, 1).isoformat() + "Z"
+
+    try:
+        service = _calendar_service()
+        result = (
+            service.events()
+            .list(
+                calendarId="primary",
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=500,
+            )
+            .execute()
+        )
+        items = result.get("items", [])
+        events = _normalize_calendar_events(items)
+        cache.clear_month(year, month)
+        cache.save_events(events)
+        return events
+    except Exception:
+        log.warning("Calendar API failed — loading from cache", exc_info=True)
+        return cache.load_events(year, month)
+
+
+def fetch_month_tasks(year: int, month: int) -> list[dict[str, Any]]:
+    """Fetch tasks whose due date falls within the given month.
+
+    Falls back to local cache on any network / API error.
+    """
+    due_min = datetime(year, month, 1).isoformat() + "Z"
+    if month == 12:
+        due_max = datetime(year + 1, 1, 1).isoformat() + "Z"
+    else:
+        due_max = datetime(year, month + 1, 1).isoformat() + "Z"
+
+    try:
+        service = _tasks_service()
+        tasklists = service.tasklists().list(maxResults=50).execute().get("items", [])
+
+        all_tasks: list[dict[str, Any]] = []
+        for tl in tasklists:
+            tasks_result = (
+                service.tasks()
+                .list(
+                    tasklist=tl["id"],
+                    dueMin=due_min,
+                    dueMax=due_max,
+                    showCompleted=True,
+                    maxResults=200,
+                )
+                .execute()
+            )
+            all_tasks.extend(tasks_result.get("items", []))
+
+        normalized = _normalize_tasks(all_tasks)
+        cache.save_events(normalized)
+        return normalized
+    except Exception:
+        log.warning("Tasks API failed — loading from cache", exc_info=True)
+        return [e for e in cache.load_events(year, month) if e["source"] == "tasks"]
+
+
+def fetch_all(year: int, month: int) -> list[dict[str, Any]]:
+    """Return combined calendar events + tasks for the month."""
+    events = fetch_month_events(year, month)
+    tasks = fetch_month_tasks(year, month)
+    return events + tasks
+
+
+# ---------------------------------------------------------------------------
+# Write — Create
+# ---------------------------------------------------------------------------
+
+def create_event(summary: str, date: str, start_time: str | None = None) -> dict:
+    """Create a Google Calendar event.
+
+    Args:
+        summary: Event title.
+        date: ISO date string, e.g. "2026-03-15".
+        start_time: Optional HH:MM (24h). If omitted an all-day event is created.
+    """
+    service = _calendar_service()
+    if start_time:
+        start_dt = datetime.fromisoformat(f"{date}T{start_time}:00")
+        end_dt = start_dt + timedelta(hours=1)
+        body = {
+            "summary": summary,
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": "Asia/Seoul"},
+            "end": {"dateTime": end_dt.isoformat(), "timeZone": "Asia/Seoul"},
+        }
+    else:
+        body = {
+            "summary": summary,
+            "start": {"date": date},
+            "end": {"date": date},
+        }
+    return service.events().insert(calendarId="primary", body=body).execute()
+
+
+def create_task(title: str, date: str) -> dict:
+    """Create a Google Task on the default task list.
+
+    Args:
+        title: Task title.
+        date: ISO date string, e.g. "2026-03-15".
+    """
+    service = _tasks_service()
+    tasklists = service.tasklists().list(maxResults=1).execute().get("items", [])
+    if not tasklists:
+        raise RuntimeError("No task list found in Google Tasks.")
+    tasklist_id = tasklists[0]["id"]
+    body = {
+        "title": title,
+        "due": f"{date}T00:00:00.000Z",
+    }
+    return service.tasks().insert(tasklist=tasklist_id, body=body).execute()
+
+
+# ---------------------------------------------------------------------------
+# Normalizers
+# ---------------------------------------------------------------------------
+
+def _normalize_calendar_events(items: list[dict]) -> list[dict[str, Any]]:
+    """Convert raw Google Calendar API items into a flat internal format."""
+    results = []
+    for item in items:
+        start = item.get("start", {})
+        dt_str = start.get("dateTime", start.get("date", ""))
+        date_only = dt_str[:10]
+
+        time_prefix = ""
+        if "dateTime" in start:
+            time_prefix = f"[{dt_str[11:16]}] "
+
+        results.append(
+            {
+                "id": item["id"],
+                "date": date_only,
+                "summary": f"{time_prefix}{item.get('summary', '(제목 없음)')}",
+                "source": "calendar",
+            }
+        )
+    return results
+
+
+def _normalize_tasks(items: list[dict]) -> list[dict[str, Any]]:
+    """Convert raw Google Tasks API items into a flat internal format."""
+    results = []
+    for item in items:
+        due = item.get("due", "")
+        date_only = due[:10] if due else ""
+        if not date_only:
+            continue
+
+        status = item.get("status", "")
+        check = "[x]" if status == "completed" else "[ ]"
+
+        results.append(
+            {
+                "id": item["id"],
+                "date": date_only,
+                "summary": f"{check} {item.get('title', '(제목 없음)')}",
+                "source": "tasks",
+            }
+        )
+    return results
