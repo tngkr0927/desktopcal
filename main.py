@@ -7,6 +7,7 @@ grid with live Google Calendar & Tasks data.
 from __future__ import annotations
 
 import logging
+import signal
 import sys
 from datetime import date
 
@@ -117,6 +118,9 @@ class MainWindow(QWidget):
 def main() -> None:
     # Optional: register for Windows auto-start
     register_autostart()
+
+    # Allow Ctrl+C in the terminal to quit the app
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # keep running in tray
