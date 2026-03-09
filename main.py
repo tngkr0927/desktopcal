@@ -10,11 +10,10 @@ import json
 import logging
 import signal
 import sys
-from datetime import date
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtCore import QPoint, QRect, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QMouseEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from src import google_service
@@ -35,7 +34,7 @@ SYNC_INTERVAL_MS = 10 * 60 * 1000
 NAV_SYNC_DELAY_MS = 500
 
 # Edge resize grip size (pixels).
-RESIZE_MARGIN = 8
+RESIZE_MARGIN = 6
 
 # Minimum window size.
 MIN_WIDTH, MIN_HEIGHT = 400, 400
@@ -47,7 +46,7 @@ _GEOMETRY_PATH = Path(__file__).resolve().parent / ".window_geometry.json"
 class _SyncWorker(QThread):
     """Runs Google API fetch in a background thread."""
 
-    finished = pyqtSignal(int, int, list)  # year, month, events
+    done = pyqtSignal(int, int, list)  # year, month, events
 
     def __init__(self, year: int, month: int, parent=None):
         super().__init__(parent)
@@ -60,7 +59,7 @@ class _SyncWorker(QThread):
         except Exception:
             log.warning("Sync failed for %d-%02d", self._year, self._month, exc_info=True)
             events = []
-        self.finished.emit(self._year, self._month, events)
+        self.done.emit(self._year, self._month, events)
 
 
 class MainWindow(QWidget):
@@ -78,12 +77,13 @@ class MainWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle("Desktop Calendar Widget")
         self.setMinimumSize(MIN_WIDTH, MIN_HEIGHT)
+        self.setMouseTracking(True)
         self.resize(820, 660)
 
         # Dragging / resizing state
         self._drag_pos: QPoint | None = None
         self._resize_edge: str | None = None
-        self._resize_origin_geo = None
+        self._resize_origin_geo: QRect | None = None
 
         # Sync state
         self._sync_worker: _SyncWorker | None = None
@@ -99,6 +99,7 @@ class MainWindow(QWidget):
 
         self._calendar = MonthlyCalendarWidget(self)
         self._calendar.date_double_clicked.connect(self._on_date_action)
+        self._calendar.nav_clicked.connect(self._on_nav)
         root.addWidget(self._calendar)
 
         # ── System tray ──────────────────────────────────────────────────────
@@ -119,6 +120,22 @@ class MainWindow(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._sync)
         self._timer.start(SYNC_INTERVAL_MS)
+
+    # ── Paint background so edges receive mouse events ────────────────────────
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Draw a rounded-rect background covering the whole window.
+        path = QPainterPath()
+        path.addRoundedRect(0.0, 0.0, float(self.width()), float(self.height()), 8.0, 8.0)
+        painter.fillPath(path, QBrush(QColor(20, 20, 20, 170)))
+
+        # Subtle border
+        painter.setPen(QPen(QColor(255, 255, 255, 25), 1.0))
+        painter.drawPath(path)
+        painter.end()
 
     # ── Geometry persistence ──────────────────────────────────────────────────
 
@@ -149,9 +166,11 @@ class MainWindow(QWidget):
 
         year, month = self._calendar.year, self._calendar.month
         log.info("Syncing %d-%02d …", year, month)
-        self._sync_worker = _SyncWorker(year, month, self)
-        self._sync_worker.finished.connect(self._on_sync_done)
-        self._sync_worker.start()
+
+        worker = _SyncWorker(year, month, self)
+        worker.done.connect(self._on_sync_done)
+        self._sync_worker = worker
+        worker.start()
 
     def _on_sync_done(self, year: int, month: int, events: list) -> None:
         # Only apply if the user hasn't navigated away
@@ -161,12 +180,12 @@ class MainWindow(QWidget):
 
     # ── Slots ────────────────────────────────────────────────────────────────
 
+    def _on_nav(self) -> None:
+        """Debounce sync after navigation."""
+        self._nav_timer.start(NAV_SYNC_DELAY_MS)
+
     def _on_date_action(self, iso_date: str) -> None:
-        """Handle double-click on a day cell (or navigation)."""
-        if iso_date == "__nav__":
-            # Debounce: restart timer on each nav click
-            self._nav_timer.start(NAV_SYNC_DELAY_MS)
-            return
+        """Handle double-click on a day cell."""
         dialog = AddEventDialog(iso_date, self)
         dialog.exec()
         if dialog.was_accepted:
@@ -232,7 +251,7 @@ class MainWindow(QWidget):
         if not (event.buttons() & Qt.MouseButton.LeftButton):
             # Update cursor shape on hover
             edge = self._edge_at(event.position().toPoint())
-            cursors = {
+            cursor_map = {
                 "left": Qt.CursorShape.SizeHorCursor,
                 "right": Qt.CursorShape.SizeHorCursor,
                 "top": Qt.CursorShape.SizeVerCursor,
@@ -242,7 +261,7 @@ class MainWindow(QWidget):
                 "top-right": Qt.CursorShape.SizeBDiagCursor,
                 "bottom-left": Qt.CursorShape.SizeBDiagCursor,
             }
-            self.setCursor(cursors.get(edge, Qt.CursorShape.ArrowCursor))
+            self.setCursor(cursor_map.get(edge, Qt.CursorShape.ArrowCursor))
             return
 
         if self._drag_pos is None:
@@ -276,6 +295,8 @@ class MainWindow(QWidget):
         self.setGeometry(x, y, w, h)
 
     def mouseReleaseEvent(self, event: QMouseEvent | None) -> None:
+        if self._resize_edge is not None:
+            self._save_geometry()
         self._drag_pos = None
         self._resize_edge = None
         self._resize_origin_geo = None

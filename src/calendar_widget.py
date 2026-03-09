@@ -12,12 +12,14 @@ from collections import defaultdict
 from datetime import date
 from typing import Any
 
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QMouseEvent
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QMouseEvent
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -97,9 +99,11 @@ class MonthlyCalendarWidget(QWidget):
 
     Signals:
         date_double_clicked(str): Emitted when a day cell is double-clicked.
+        nav_clicked(): Emitted when prev/next month buttons are clicked.
     """
 
     date_double_clicked = pyqtSignal(str)
+    nav_clicked = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -107,6 +111,8 @@ class MonthlyCalendarWidget(QWidget):
         self._month = date.today().month
         self._events: list[dict[str, Any]] = []
         self._grid: QGridLayout | None = None
+        self._rebuilding = False
+        self._cells: list[QWidget] = []
         self._init_ui()
 
     # ---- public API --------------------------------------------------------
@@ -129,6 +135,8 @@ class MonthlyCalendarWidget(QWidget):
         self._rebuild()
 
     def go_prev(self) -> None:
+        if self._rebuilding:
+            return
         if self._month == 1:
             self._year -= 1
             self._month = 12
@@ -137,6 +145,8 @@ class MonthlyCalendarWidget(QWidget):
         self._rebuild()
 
     def go_next(self) -> None:
+        if self._rebuilding:
+            return
         if self._month == 12:
             self._year += 1
             self._month = 1
@@ -152,29 +162,37 @@ class MonthlyCalendarWidget(QWidget):
 
         # Header row: ◀  2026년 3월  ▶
         header = QWidget()
-        h_layout = QGridLayout(header)
-        h_layout.setContentsMargins(0, 0, 0, 0)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(4, 0, 4, 0)
 
-        self._btn_prev = QLabel("◀")
-        self._btn_prev.setFont(QFont("Segoe UI", 14))
-        self._btn_prev.setStyleSheet("color: #FFFFFF; background: transparent;")
+        btn_style = """
+            QPushButton {
+                color: #FFFFFF; background: transparent; border: none;
+                font-size: 14px; padding: 4px 12px;
+            }
+            QPushButton:hover { color: #4FC3F7; }
+        """
+
+        self._btn_prev = QPushButton("◀")
+        self._btn_prev.setStyleSheet(btn_style)
         self._btn_prev.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_prev.mousePressEvent = lambda _: (self.go_prev(), self.date_double_clicked.emit("__nav__"))
+        self._btn_prev.clicked.connect(self._on_prev)
 
         self._title = QLabel()
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         self._title.setStyleSheet("color: #FFFFFF; background: transparent;")
 
-        self._btn_next = QLabel("▶")
-        self._btn_next.setFont(QFont("Segoe UI", 14))
-        self._btn_next.setStyleSheet("color: #FFFFFF; background: transparent;")
+        self._btn_next = QPushButton("▶")
+        self._btn_next.setStyleSheet(btn_style)
         self._btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_next.mousePressEvent = lambda _: (self.go_next(), self.date_double_clicked.emit("__nav__"))
+        self._btn_next.clicked.connect(self._on_next)
 
-        h_layout.addWidget(self._btn_prev, 0, 0, Qt.AlignmentFlag.AlignLeft)
-        h_layout.addWidget(self._title, 0, 1, Qt.AlignmentFlag.AlignCenter)
-        h_layout.addWidget(self._btn_next, 0, 2, Qt.AlignmentFlag.AlignRight)
+        h_layout.addWidget(self._btn_prev)
+        h_layout.addStretch()
+        h_layout.addWidget(self._title)
+        h_layout.addStretch()
+        h_layout.addWidget(self._btn_next)
 
         self._outer.addWidget(header)
 
@@ -198,37 +216,54 @@ class MonthlyCalendarWidget(QWidget):
 
         self._rebuild()
 
+    def _on_prev(self) -> None:
+        self.go_prev()
+        self.nav_clicked.emit()
+
+    def _on_next(self) -> None:
+        self.go_next()
+        self.nav_clicked.emit()
+
     def _rebuild(self) -> None:
         """Rebuild the day-cell grid for the current year/month."""
-        self._title.setText(f"{self._year}년 {self._month}월")
+        if self._rebuilding:
+            return
+        self._rebuilding = True
 
-        # Clear old grid
-        if self._grid is not None:
-            while self._grid.count():
-                item = self._grid.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-        else:
-            self._grid = QGridLayout(self._grid_container)
-            self._grid.setSpacing(4)
-            self._grid.setContentsMargins(0, 0, 0, 0)
+        try:
+            self._title.setText(f"{self._year}년 {self._month}월")
 
-        # Build date→items mapping
-        items_by_date: dict[str, list[str]] = defaultdict(list)
-        for ev in self._events:
-            items_by_date[ev["date"]].append(ev["summary"])
+            # Destroy old cells immediately (not deleteLater)
+            for cell in self._cells:
+                cell.setParent(None)
+                cell.deleteLater()
+            self._cells.clear()
 
-        today = date.today()
-        cal = calendar.Calendar(firstweekday=0)  # Monday first
-        weeks = cal.monthdayscalendar(self._year, self._month)
+            # Create grid layout if first time
+            if self._grid is None:
+                self._grid = QGridLayout(self._grid_container)
+                self._grid.setSpacing(4)
+                self._grid.setContentsMargins(0, 0, 0, 0)
 
-        for row, week in enumerate(weeks):
-            for col, day in enumerate(week):
-                if day == 0:
-                    cell = EmptyCell()
-                else:
-                    iso = f"{self._year}-{self._month:02d}-{day:02d}"
-                    is_today = (self._year == today.year and self._month == today.month and day == today.day)
-                    cell = DayCell(iso, day, items_by_date.get(iso, []), is_today)
-                    cell.double_clicked.connect(self.date_double_clicked)
-                self._grid.addWidget(cell, row, col)
+            # Build date→items mapping
+            items_by_date: dict[str, list[str]] = defaultdict(list)
+            for ev in self._events:
+                items_by_date[ev["date"]].append(ev["summary"])
+
+            today = date.today()
+            cal = calendar.Calendar(firstweekday=0)  # Monday first
+            weeks = cal.monthdayscalendar(self._year, self._month)
+
+            for row, week in enumerate(weeks):
+                for col, day in enumerate(week):
+                    if day == 0:
+                        cell = EmptyCell()
+                    else:
+                        iso = f"{self._year}-{self._month:02d}-{day:02d}"
+                        is_today = (self._year == today.year and self._month == today.month and day == today.day)
+                        cell = DayCell(iso, day, items_by_date.get(iso, []), is_today)
+                        cell.double_clicked.connect(self.date_double_clicked)
+                    self._cells.append(cell)
+                    self._grid.addWidget(cell, row, col)
+        finally:
+            self._rebuilding = False
