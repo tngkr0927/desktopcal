@@ -100,6 +100,7 @@ class MainWindow(QWidget):
         self._calendar = MonthlyCalendarWidget(self)
         self._calendar.date_double_clicked.connect(self._on_date_action)
         self._calendar.nav_clicked.connect(self._on_nav)
+        self._calendar.close_clicked.connect(self._quit)
         root.addWidget(self._calendar)
 
         # ── System tray ──────────────────────────────────────────────────────

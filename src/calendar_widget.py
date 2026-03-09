@@ -25,8 +25,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-# Day-of-week header labels (Monday-first)
-DAY_HEADERS = ["월", "화", "수", "목", "금", "토", "일"]
+# Day-of-week header labels (Sunday-first)
+DAY_HEADERS = ["일", "월", "화", "수", "목", "금", "토"]
 
 
 class DayCell(QFrame):
@@ -104,6 +104,7 @@ class MonthlyCalendarWidget(QWidget):
 
     date_double_clicked = pyqtSignal(str)
     nav_clicked = pyqtSignal()
+    close_clicked = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -188,11 +189,24 @@ class MonthlyCalendarWidget(QWidget):
         self._btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_next.clicked.connect(self._on_next)
 
+        close_style = """
+            QPushButton {
+                color: #888888; background: transparent; border: none;
+                font-size: 14px; padding: 4px 8px;
+            }
+            QPushButton:hover { color: #FF5252; }
+        """
+        self._btn_close = QPushButton("✕")
+        self._btn_close.setStyleSheet(close_style)
+        self._btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_close.clicked.connect(self.close_clicked)
+
         h_layout.addWidget(self._btn_prev)
         h_layout.addStretch()
         h_layout.addWidget(self._title)
         h_layout.addStretch()
         h_layout.addWidget(self._btn_next)
+        h_layout.addWidget(self._btn_close)
 
         self._outer.addWidget(header)
 
@@ -205,7 +219,8 @@ class MonthlyCalendarWidget(QWidget):
             lbl = QLabel(name)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-            color = "#FF8A80" if col >= 5 else "#B0BEC5"
+            # Sunday (col 0) and Saturday (col 6) in red
+            color = "#FF8A80" if col == 0 or col == 6 else "#B0BEC5"
             lbl.setStyleSheet(f"color: {color}; background: transparent;")
             dow_layout.addWidget(lbl, 0, col)
         self._outer.addWidget(dow_widget)
@@ -251,7 +266,7 @@ class MonthlyCalendarWidget(QWidget):
                 items_by_date[ev["date"]].append(ev["summary"])
 
             today = date.today()
-            cal = calendar.Calendar(firstweekday=0)  # Monday first
+            cal = calendar.Calendar(firstweekday=6)  # Sunday first
             weeks = cal.monthdayscalendar(self._year, self._month)
 
             for row, week in enumerate(weeks):
