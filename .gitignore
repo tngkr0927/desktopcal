@@ -13,10 +13,11 @@ credentials.json
 token.json
 .env
 
-# Local cache
+# Local cache & state
 cache.db
 cache.db-wal
 cache.db-shm
+.window_geometry.json
 
 # IDE
 .vscode/
