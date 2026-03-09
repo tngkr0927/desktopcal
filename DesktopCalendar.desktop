@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=Desktop Calendar
-Comment=Desktop Calendar Widget
-Exec=/home/user/desktopcal/run.sh
-Icon=/home/user/desktopcal/assets/tray_icon.png
-Terminal=false
-Type=Application
-Categories=Utility;
-StartupNotify=false
