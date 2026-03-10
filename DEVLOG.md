@@ -299,6 +299,97 @@ NAV_SYNC_DELAY_MS = 100  # 기존 500ms → 100ms
 
 ---
 
+## 9. 월 변경 시 빈 화면 깜빡임 제거
+
+### 문제
+- 월을 바꾸면 빈 달력이 순간적으로 떴다가 사라짐
+
+### 원인
+`go_prev()`/`go_next()`에서 `_rebuild(빈 데이터)`가 1번, `_on_nav()`에서 `set_events(캐시)`로 `_rebuild()`가 또 1번 — **이중 빌드**
+
+```
+_on_prev() → go_prev() → _rebuild(빈 데이터) ← 여기서 깜빡!
+           → nav_clicked.emit() → _on_nav() → set_events(캐시) → _rebuild(캐시 데이터)
+```
+
+### 해결
+`go_prev()`/`go_next()`에서 `_rebuild()` 호출 제거. 월/년 값만 변경하고, `_on_nav()`에서 캐시와 함께 한 번만 빌드.
+
+### 배운 점
+- **이벤트 흐름 추적**: 버그의 원인을 찾으려면 시그널/슬롯 체인을 따라가며 호출 순서를 확인해야 함
+- UI 깜빡임은 보통 **불필요한 중간 렌더링** 때문에 발생. 최종 상태만 1회 렌더링하면 해결됨
+
+---
+
+## 10. 한국 공휴일 표시 및 일요일 날짜 빨간색
+
+### 문제
+- 달력에 한국 공휴일이 전혀 표시되지 않음
+- 일요일 날짜 숫자가 평일과 같은 흰색이라 구분이 안 됨
+
+### 해결 1: 공휴일 데이터 모듈 (`src/holidays.py`)
+
+```python
+# 고정 공휴일 (매년 동일)
+_FIXED_HOLIDAYS = [
+    (1, 1, "신정"), (3, 1, "삼일절"), (5, 5, "어린이날"),
+    (6, 6, "현충일"), (8, 15, "광복절"), (10, 3, "개천절"),
+    (10, 9, "한글날"), (12, 25, "성탄절"),
+]
+
+# 음력 기반 공휴일 (연도별 룩업 테이블)
+_LUNAR_HOLIDAYS = {
+    2026: [
+        (2, 16, "설날 연휴"), (2, 17, "설날"), (2, 18, "설날 연휴"),
+        (5, 24, "부처님오신날"), ...
+    ],
+    ...
+}
+```
+
+**왜 룩업 테이블?** 음력→양력 변환은 복잡한 계산이 필요하고 외부 라이브러리 의존성이 생김. 2024~2030년 데이터를 미리 계산해두면 외부 의존성 없이 정확하게 동작.
+
+### 해결 2: DayCell에 공휴일/일요일 스타일 적용
+
+```python
+class DayCell:
+    def __init__(self, ..., is_sunday=False, holiday_name=None):
+        is_red = is_sunday or holiday_name is not None
+
+        # 날짜 숫자 색상
+        if is_today:
+            color = "#4FC3F7"      # 오늘: 파란색 (최우선)
+        elif is_red:
+            color = "#FF6B6B"      # 일요일/공휴일: 빨간색
+        else:
+            color = "#E0E0E0"      # 평일: 밝은 회색
+
+        # 공휴일 이름 표시
+        if holiday_name:
+            h_lbl = QLabel(holiday_name)
+            h_lbl.setStyleSheet("color: #FF8A80; ...")
+```
+
+### 해결 3: _rebuild에서 공휴일 조회
+
+```python
+holidays = get_holidays(self._year, self._month)  # {day: name}
+
+cell = DayCell(
+    iso, day, items,
+    is_today=is_today,
+    is_sunday=(col == 0),         # Sunday-first 레이아웃에서 0번째 열
+    holiday_name=holidays.get(day),
+)
+```
+
+### 배운 점
+- **데이터와 표현 분리**: 공휴일 데이터(`holidays.py`)와 UI(`calendar_widget.py`)를 분리
+- **룩업 테이블 vs 계산**: 데이터가 제한적이고 변하지 않으면 계산보다 테이블이 간단하고 안전
+- **색상 우선순위**: 오늘 > 일요일/공휴일 > 평일 순으로 색상 결정 (if-elif 체인)
+
+---
+
 ### 데이터 흐름
 ```
 Google Calendar/Tasks API

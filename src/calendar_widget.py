@@ -25,6 +25,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from src.holidays import get_holidays
+
 # Day-of-week header labels (Sunday-first)
 DAY_HEADERS = ["일", "월", "화", "수", "목", "금", "토"]
 
@@ -38,7 +40,15 @@ class DayCell(QFrame):
 
     double_clicked = pyqtSignal(str)  # ISO date string
 
-    def __init__(self, iso_date: str, day: int, items: list[str], is_today: bool = False):
+    def __init__(
+        self,
+        iso_date: str,
+        day: int,
+        items: list[str],
+        is_today: bool = False,
+        is_sunday: bool = False,
+        holiday_name: str | None = None,
+    ):
         super().__init__()
         self._iso_date = iso_date
         self.setFrameShape(QFrame.Shape.Box)
@@ -61,12 +71,25 @@ class DayCell(QFrame):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(1)
 
-        # Day number
+        # Day number — red for Sundays and holidays
+        is_red = is_sunday or holiday_name is not None
         day_label = QLabel(str(day))
         day_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        color = "#4FC3F7" if is_today else "#E0E0E0"
+        if is_today:
+            color = "#4FC3F7"
+        elif is_red:
+            color = "#FF6B6B"
+        else:
+            color = "#E0E0E0"
         day_label.setStyleSheet(f"color: {color}; background: transparent; border: none;")
         layout.addWidget(day_label)
+
+        # Holiday name
+        if holiday_name:
+            h_lbl = QLabel(holiday_name)
+            h_lbl.setFont(QFont("Segoe UI", 7))
+            h_lbl.setStyleSheet("color: #FF8A80; background: transparent; border: none;")
+            layout.addWidget(h_lbl)
 
         # Event/task lines
         for text in items:
@@ -268,6 +291,7 @@ class MonthlyCalendarWidget(QWidget):
                 items_by_date[ev["date"]].append(ev["summary"])
 
             today = date.today()
+            holidays = get_holidays(self._year, self._month)
             cal = calendar.Calendar(firstweekday=6)  # Sunday first
             weeks = cal.monthdayscalendar(self._year, self._month)
 
@@ -278,7 +302,14 @@ class MonthlyCalendarWidget(QWidget):
                     else:
                         iso = f"{self._year}-{self._month:02d}-{day:02d}"
                         is_today = (self._year == today.year and self._month == today.month and day == today.day)
-                        cell = DayCell(iso, day, items_by_date.get(iso, []), is_today)
+                        is_sunday = col == 0  # Sunday-first layout
+                        holiday_name = holidays.get(day)
+                        cell = DayCell(
+                            iso, day, items_by_date.get(iso, []),
+                            is_today=is_today,
+                            is_sunday=is_sunday,
+                            holiday_name=holiday_name,
+                        )
                         cell.double_clicked.connect(self.date_double_clicked)
                     self._cells.append(cell)
                     self._grid.addWidget(cell, row, col)
