@@ -164,7 +164,9 @@ class AddEventDialog(QDialog):
 
         # Type selector
         type_row = QHBoxLayout()
-        type_row.addWidget(QLabel("유형"))
+        lbl_type = QLabel("유형")
+        lbl_type.setFixedWidth(40)
+        type_row.addWidget(lbl_type)
         self._type_combo = QComboBox()
         self._type_combo.addItems(["캘린더 일정", "할 일 (Task)"])
         type_row.addWidget(self._type_combo)
@@ -172,7 +174,9 @@ class AddEventDialog(QDialog):
 
         # Title input
         title_row = QHBoxLayout()
-        title_row.addWidget(QLabel("제목"))
+        lbl_title = QLabel("제목")
+        lbl_title.setFixedWidth(40)
+        title_row.addWidget(lbl_title)
         self._title_edit = QLineEdit()
         self._title_edit.setPlaceholderText("일정 또는 할 일 제목을 입력하세요")
         title_row.addWidget(self._title_edit)
@@ -181,6 +185,7 @@ class AddEventDialog(QDialog):
         # Time dropdown (5-min intervals) + manual input checkbox
         self._time_row = QHBoxLayout()
         self._time_label = QLabel("시간")
+        self._time_label.setFixedWidth(40)
         self._time_row.addWidget(self._time_label)
 
         self._time_combo = QComboBox()
