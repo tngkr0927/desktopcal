@@ -11,6 +11,7 @@ from typing import Any
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QHBoxLayout,
@@ -74,6 +75,22 @@ QPushButton#btnDelete:hover {
 QScrollArea {
     border: none;
     background: transparent;
+}
+QCheckBox {
+    color: #E0E0E0;
+    font-size: 11px;
+    spacing: 4px;
+}
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #555;
+    border-radius: 3px;
+    background-color: #3C3C3C;
+}
+QCheckBox::indicator:checked {
+    background-color: #4FC3F7;
+    border-color: #4FC3F7;
 }
 """
 
@@ -161,17 +178,28 @@ class AddEventDialog(QDialog):
         title_row.addWidget(self._title_edit)
         layout.addLayout(title_row)
 
-        # Time dropdown (5-min intervals)
+        # Time dropdown (5-min intervals) + manual input checkbox
         self._time_row = QHBoxLayout()
         self._time_label = QLabel("시간")
         self._time_row.addWidget(self._time_label)
+
         self._time_combo = QComboBox()
         self._time_combo.addItems(_build_time_options())
         self._time_combo.setEditable(False)
         self._time_combo.setMaximumWidth(140)
-        # Show placeholder-like first item
         self._time_combo.setItemText(0, "종일")
         self._time_row.addWidget(self._time_combo)
+
+        self._time_edit = QLineEdit()
+        self._time_edit.setPlaceholderText("HH:MM")
+        self._time_edit.setMaximumWidth(140)
+        self._time_edit.setVisible(False)
+        self._time_row.addWidget(self._time_edit)
+
+        self._manual_check = QCheckBox("직접입력")
+        self._manual_check.toggled.connect(self._on_manual_toggled)
+        self._time_row.addWidget(self._manual_check)
+
         layout.addLayout(self._time_row)
 
         # Toggle time field visibility
@@ -222,10 +250,20 @@ class AddEventDialog(QDialog):
 
     # ── Slots ──
 
+    def _on_manual_toggled(self, checked: bool) -> None:
+        """Switch between dropdown and manual text input for time."""
+        self._time_combo.setVisible(not checked)
+        self._time_edit.setVisible(checked)
+        if checked:
+            self._time_edit.setFocus()
+
     def _on_type_changed(self, index: int) -> None:
         is_calendar = index == 0
-        self._time_combo.setVisible(is_calendar)
+        is_manual = self._manual_check.isChecked()
+        self._time_combo.setVisible(is_calendar and not is_manual)
+        self._time_edit.setVisible(is_calendar and is_manual)
         self._time_label.setVisible(is_calendar)
+        self._manual_check.setVisible(is_calendar)
 
     def _on_delete(self, ev: dict[str, Any], row_widget: QWidget) -> None:
         """Delete an event after confirmation."""
@@ -258,8 +296,11 @@ class AddEventDialog(QDialog):
 
         is_calendar = self._type_combo.currentIndex() == 0
         time_text = None
-        if is_calendar and self._time_combo.currentIndex() > 0:
-            time_text = self._time_combo.currentText()
+        if is_calendar:
+            if self._manual_check.isChecked():
+                time_text = self._time_edit.text().strip() or None
+            elif self._time_combo.currentIndex() > 0:
+                time_text = self._time_combo.currentText()
 
         try:
             if is_calendar:
