@@ -137,6 +137,7 @@ class MonthlyCalendarWidget(QWidget):
         self._grid: QGridLayout | None = None
         self._rebuilding = False
         self._cells: list[QWidget] = []
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         self._init_ui()
 
     # ---- public API --------------------------------------------------------
