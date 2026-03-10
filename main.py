@@ -185,8 +185,8 @@ class MainWindow(QWidget):
         """Show cached data immediately, then schedule API refresh."""
         year, month = self._calendar.year, self._calendar.month
         cached = cache.load_events(year, month)
+        self._calendar.set_events(cached)
         if cached:
-            self._calendar.set_events(cached)
             log.info("Showing %d cached items for %d-%02d", len(cached), year, month)
         self._nav_timer.start(NAV_SYNC_DELAY_MS)
 

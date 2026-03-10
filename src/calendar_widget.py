@@ -147,7 +147,6 @@ class MonthlyCalendarWidget(QWidget):
             self._month = 12
         else:
             self._month -= 1
-        self._rebuild()
 
     def go_next(self) -> None:
         if self._rebuilding:
@@ -157,7 +156,6 @@ class MonthlyCalendarWidget(QWidget):
             self._month = 1
         else:
             self._month += 1
-        self._rebuild()
 
     # ---- internal ----------------------------------------------------------
 
