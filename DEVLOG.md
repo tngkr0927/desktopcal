@@ -390,6 +390,75 @@ cell = DayCell(
 
 ---
 
+## 11. 리사이즈 커서가 달력 위에서 유지되는 버그 수정
+
+### 문제
+- 윈도우 가장자리에서 마우스를 올리면 리사이즈 커서(↔)가 나타나는데, 달력 위로 이동해도 커서가 돌아오지 않음
+
+### 원인
+```
+1. 마우스가 가장자리 → MainWindow.setCursor(SizeHorCursor)
+2. 마우스가 달력 위로 이동 → 자식 위젯이 mouseMoveEvent를 받아서
+   MainWindow의 mouseMoveEvent가 호출되지 않음 → setCursor(ArrowCursor) 실행 안 됨
+3. 자식 위젯에 자체 커서 미설정 → 부모의 SizeHorCursor을 상속
+```
+
+### 해결
+```python
+# MonthlyCalendarWidget에 자체 커서를 명시적으로 설정
+self.setCursor(Qt.CursorShape.ArrowCursor)
+```
+
+### 배운 점
+- **Qt 커서 상속**: 자식 위젯에 커서가 없으면 부모 위젯의 커서를 상속함
+- 자식에 명시적 커서를 설정하면 부모 커서와 무관하게 자체 커서를 표시
+
+---
+
+## 12. 창 이동을 휠클릭(중간 버튼) 드래그로 변경
+
+### 문제
+- 좌클릭 드래그로 창을 이동하면, 달력 셀 클릭/더블클릭과 충돌
+
+### 해결
+
+#### MainWindow 마우스 이벤트 분리
+```python
+def mousePressEvent(self, event):
+    if event.button() == Qt.MouseButton.LeftButton:
+        # 가장자리일 때만 리사이즈
+        edge = self._edge_at(event.position().toPoint())
+        if edge:
+            self._resize_edge = edge
+            ...
+    elif event.button() == Qt.MouseButton.MiddleButton:
+        # 휠클릭: 창 드래그
+        self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+```
+
+#### 자식 위젯에서 중간 버튼 이벤트 전달
+```python
+class DayCell(QFrame):
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            event.ignore()  # 부모(MainWindow)로 전달
+            return
+        super().mousePressEvent(event)
+```
+
+### Qt 이벤트 전파 메커니즘
+| 메서드 | 효과 |
+|--------|------|
+| `event.accept()` | 이벤트를 이 위젯에서 처리함 (기본값). 부모에게 전달 안 됨 |
+| `event.ignore()` | 이 위젯이 처리 안 함. Qt가 부모 위젯으로 자동 전파 |
+
+### 배운 점
+- **이벤트 버블링**: Qt에서 `ignore()`하면 이벤트가 부모 위젯으로 올라감 (웹의 이벤트 버블링과 유사)
+- **마우스 버튼 분리**: 좌클릭/중간클릭/우클릭을 구분해서 다른 동작을 할당할 수 있음
+- `Qt.MouseButton.MiddleButton`: 마우스 휠 버튼 클릭
+
+---
+
 ### 데이터 흐름
 ```
 Google Calendar/Tasks API
