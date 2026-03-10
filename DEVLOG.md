@@ -203,6 +203,102 @@ desktopcal/
 └── requirements.txt         # 의존성 목록
 ```
 
+---
+
+## 8. 월 변경 시 동기화 속도 개선
+
+### 문제
+- 월을 바꾸면 일정이 비어있는 빈 화면이 수 초간 보이다가 뒤늦게 채워짐
+- 체감 로딩이 매우 느림
+
+### 원인 분석 (4가지)
+
+| 원인 | 설명 |
+|------|------|
+| `build()` 반복 호출 | 매 API 호출마다 `build("calendar", "v3", ...)` → HTTP discovery 문서를 다시 가져옴 |
+| 순차 API 호출 | `fetch_month_events()` 완료 → `fetch_month_tasks()` 시작. 직렬이라 대기 시간이 합산됨 |
+| 캐시 미활용 | 이미 SQLite에 캐시가 있는데도, API 응답 올 때까지 빈 화면 |
+| 500ms 디바운스 | 월 변경 후 0.5초 대기 후에야 API 호출 시작 |
+
+### 해결 1: 서비스 객체 캐싱 (싱글턴)
+
+```python
+_cached_calendar_service = None
+
+def _calendar_service():
+    global _cached_calendar_service
+    if _cached_calendar_service is None:
+        _cached_calendar_service = build("calendar", "v3", credentials=get_credentials())
+    return _cached_calendar_service
+```
+
+**왜?** `build()`는 내부적으로 Google API의 discovery document를 HTTP로 가져와서 파싱합니다. 이 과정이 수백ms 걸리는데, 서비스 객체는 재사용 가능하므로 최초 1회만 생성하면 됩니다.
+
+**추가**: 401/403 에러 시 `invalidate_services()`로 캐시를 무효화해서 토큰 갱신 후 재생성되게 처리.
+
+### 해결 2: events + tasks 병렬 fetch
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def fetch_all(year, month):
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        fut_events = pool.submit(fetch_month_events, year, month)
+        fut_tasks = pool.submit(fetch_month_tasks, year, month)
+        for fut in as_completed([fut_events, fut_tasks]):
+            results.extend(fut.result())
+```
+
+**왜?** events와 tasks는 서로 독립적인 API 호출입니다. 순차적으로 하면 각각 1초씩 걸릴 때 2초가 되지만, 병렬이면 1초면 됩니다.
+
+**핵심 개념**:
+- `ThreadPoolExecutor`: 스레드 풀을 만들어서 작업을 분배
+- `pool.submit()`: 작업을 스레드에 제출 (즉시 반환, 백그라운드 실행)
+- `as_completed()`: 완료되는 순서대로 결과를 받아옴
+
+### 해결 3: 캐시 우선 표시 (Optimistic UI)
+
+```python
+def _on_nav(self) -> None:
+    year, month = self._calendar.year, self._calendar.month
+    cached = cache.load_events(year, month)
+    if cached:
+        self._calendar.set_events(cached)  # 즉시 표시!
+    self._nav_timer.start(NAV_SYNC_DELAY_MS)  # API는 뒤에서 갱신
+```
+
+**왜?** 사용자가 월을 바꾸는 순간, SQLite 캐시에서 읽는 건 ~1ms입니다. 이걸 먼저 보여주고, 백그라운드에서 API 결과가 오면 갱신하면 됩니다.
+
+**패턴 이름**: **Optimistic UI** (낙관적 UI)
+- 로컬 데이터를 먼저 보여줘서 즉각적인 반응을 제공
+- 서버 데이터가 오면 조용히 업데이트
+- 대부분의 경우 캐시 데이터와 서버 데이터가 동일하므로 사용자는 변화를 못 느낌
+
+### 해결 4: 디바운스 감소
+
+```python
+NAV_SYNC_DELAY_MS = 100  # 기존 500ms → 100ms
+```
+
+**왜?** 캐시를 먼저 보여주므로 사용자 체감은 이미 즉각적입니다. API 호출까지의 대기도 줄여서 최신 데이터로의 갱신도 빨라지게 합니다.
+
+### 개선 효과 요약
+
+| 항목 | Before | After |
+|------|--------|-------|
+| 서비스 생성 | 매번 ~300ms | 최초 1회만 |
+| API 호출 | 순차 (A+B) | 병렬 (max(A,B)) |
+| 월 변경 시 화면 | 빈 화면 → 수초 대기 | 캐시 즉시 표시 → API 갱신 |
+| 디바운스 | 500ms | 100ms |
+
+### 배운 점
+- **싱글턴 패턴**: 비싼 객체는 한 번 만들어서 재사용. `global` 변수 + `None` 체크로 간단 구현
+- **ThreadPoolExecutor**: Python 표준 라이브러리로 간단하게 병렬 처리. `with`문으로 자동 정리
+- **Optimistic UI**: 로컬 캐시 → 즉시 표시 → 서버 갱신은 모바일/웹에서도 널리 쓰이는 패턴
+- **디바운스**: 빠른 연속 입력에서 마지막 입력만 처리. `QTimer.setSingleShot(True)` + `start()`로 구현
+
+---
+
 ### 데이터 흐름
 ```
 Google Calendar/Tasks API

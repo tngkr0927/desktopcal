@@ -16,7 +16,7 @@ from PyQt6.QtCore import QPoint, QRect, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QMouseEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
-from src import google_service
+from src import cache, google_service
 from src.add_event_dialog import AddEventDialog
 from src.calendar_widget import MonthlyCalendarWidget
 from src.system_tray import SystemTrayManager, register_autostart
@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 SYNC_INTERVAL_MS = 10 * 60 * 1000
 
 # Debounce delay for navigation sync (milliseconds).
-NAV_SYNC_DELAY_MS = 500
+NAV_SYNC_DELAY_MS = 100
 
 # Edge resize grip size (pixels).
 RESIZE_MARGIN = 6
@@ -182,7 +182,12 @@ class MainWindow(QWidget):
     # ── Slots ────────────────────────────────────────────────────────────────
 
     def _on_nav(self) -> None:
-        """Debounce sync after navigation."""
+        """Show cached data immediately, then schedule API refresh."""
+        year, month = self._calendar.year, self._calendar.month
+        cached = cache.load_events(year, month)
+        if cached:
+            self._calendar.set_events(cached)
+            log.info("Showing %d cached items for %d-%02d", len(cached), year, month)
         self._nav_timer.start(NAV_SYNC_DELAY_MS)
 
     def _on_date_action(self, iso_date: str) -> None:

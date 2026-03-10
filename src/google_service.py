@@ -7,6 +7,7 @@ with automatic fallback to the local SQLite cache on network errors.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -20,15 +21,32 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Service helpers
+# Service helpers (cached singletons — avoids repeated discovery overhead)
 # ---------------------------------------------------------------------------
 
+_cached_calendar_service = None
+_cached_tasks_service = None
+
+
 def _calendar_service():
-    return build("calendar", "v3", credentials=get_credentials())
+    global _cached_calendar_service
+    if _cached_calendar_service is None:
+        _cached_calendar_service = build("calendar", "v3", credentials=get_credentials())
+    return _cached_calendar_service
 
 
 def _tasks_service():
-    return build("tasks", "v1", credentials=get_credentials())
+    global _cached_tasks_service
+    if _cached_tasks_service is None:
+        _cached_tasks_service = build("tasks", "v1", credentials=get_credentials())
+    return _cached_tasks_service
+
+
+def invalidate_services():
+    """Clear cached service objects (e.g. after token refresh)."""
+    global _cached_calendar_service, _cached_tasks_service
+    _cached_calendar_service = None
+    _cached_tasks_service = None
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +83,11 @@ def fetch_month_events(year: int, month: int) -> list[dict[str, Any]]:
         cache.clear_month(year, month)
         cache.save_events(events)
         return events
+    except HttpError as e:
+        if e.resp.status in (401, 403):
+            invalidate_services()
+        log.warning("Calendar API failed — loading from cache", exc_info=True)
+        return cache.load_events(year, month)
     except Exception:
         log.warning("Calendar API failed — loading from cache", exc_info=True)
         return cache.load_events(year, month)
@@ -103,16 +126,28 @@ def fetch_month_tasks(year: int, month: int) -> list[dict[str, Any]]:
         normalized = _normalize_tasks(all_tasks)
         cache.save_events(normalized)
         return normalized
+    except HttpError as e:
+        if e.resp.status in (401, 403):
+            invalidate_services()
+        log.warning("Tasks API failed — loading from cache", exc_info=True)
+        return [e for e in cache.load_events(year, month) if e["source"] == "tasks"]
     except Exception:
         log.warning("Tasks API failed — loading from cache", exc_info=True)
         return [e for e in cache.load_events(year, month) if e["source"] == "tasks"]
 
 
 def fetch_all(year: int, month: int) -> list[dict[str, Any]]:
-    """Return combined calendar events + tasks for the month."""
-    events = fetch_month_events(year, month)
-    tasks = fetch_month_tasks(year, month)
-    return events + tasks
+    """Return combined calendar events + tasks for the month (parallel)."""
+    results: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        fut_events = pool.submit(fetch_month_events, year, month)
+        fut_tasks = pool.submit(fetch_month_tasks, year, month)
+        for fut in as_completed([fut_events, fut_tasks]):
+            try:
+                results.extend(fut.result())
+            except Exception:
+                log.warning("Parallel fetch error", exc_info=True)
+    return results
 
 
 # ---------------------------------------------------------------------------
