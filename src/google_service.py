@@ -188,25 +188,60 @@ def create_task(title: str, date: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _normalize_calendar_events(items: list[dict]) -> list[dict[str, Any]]:
-    """Convert raw Google Calendar API items into a flat internal format."""
+    """Convert raw Google Calendar API items into a flat internal format.
+
+    Multi-day or overnight events are duplicated onto each date they span.
+    """
     results = []
     for item in items:
         start = item.get("start", {})
-        dt_str = start.get("dateTime", start.get("date", ""))
-        date_only = dt_str[:10]
+        end = item.get("end", {})
+        summary_text = item.get("summary", "(제목 없음)")
+        event_id = item["id"]
 
-        time_prefix = ""
         if "dateTime" in start:
-            time_prefix = f"[{dt_str[11:16]}] "
+            # Timed event — may span multiple days
+            start_dt = datetime.fromisoformat(start["dateTime"])
+            end_dt = datetime.fromisoformat(end.get("dateTime", start["dateTime"]))
+            time_prefix = f"[{start_dt.strftime('%H:%M')}] "
 
-        results.append(
-            {
-                "id": item["id"],
-                "date": date_only,
-                "summary": f"{time_prefix}{item.get('summary', '(제목 없음)')}",
-                "source": "calendar",
-            }
-        )
+            start_date = start_dt.date()
+            end_date = end_dt.date()
+            # If event ends exactly at midnight, it doesn't occupy that day
+            if end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0:
+                end_date -= timedelta(days=1)
+
+            current = start_date
+            while current <= end_date:
+                prefix = time_prefix if current == start_date else "[연속] "
+                results.append(
+                    {
+                        "id": event_id,
+                        "date": current.isoformat(),
+                        "summary": f"{prefix}{summary_text}",
+                        "source": "calendar",
+                    }
+                )
+                current += timedelta(days=1)
+        else:
+            # All-day event — may span multiple days
+            start_date = datetime.fromisoformat(start.get("date", "")).date()
+            end_date = datetime.fromisoformat(end.get("date", start.get("date", ""))).date()
+            # Google all-day end date is exclusive
+            end_date -= timedelta(days=1)
+
+            current = start_date
+            while current <= end_date:
+                results.append(
+                    {
+                        "id": event_id,
+                        "date": current.isoformat(),
+                        "summary": summary_text,
+                        "source": "calendar",
+                    }
+                )
+                current += timedelta(days=1)
+
     return results
 
 
