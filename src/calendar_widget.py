@@ -47,6 +47,7 @@ class DayCell(QFrame):
         items: list[str],
         is_today: bool = False,
         is_sunday: bool = False,
+        is_saturday: bool = False,
         holiday_name: str | None = None,
     ):
         super().__init__()
@@ -71,14 +72,15 @@ class DayCell(QFrame):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(1)
 
-        # Day number — red for Sundays and holidays
-        is_red = is_sunday or holiday_name is not None
+        # Day number color: today > sunday/holiday(red) > saturday(blue) > default
         day_label = QLabel(str(day))
         day_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         if is_today:
             color = "#4FC3F7"
-        elif is_red:
+        elif is_sunday or holiday_name is not None:
             color = "#FF6B6B"
+        elif is_saturday:
+            color = "#5B9BD5"
         else:
             color = "#E0E0E0"
         day_label.setStyleSheet(f"color: {color}; background: transparent; border: none;")
@@ -321,12 +323,14 @@ class MonthlyCalendarWidget(QWidget):
                     else:
                         iso = f"{self._year}-{self._month:02d}-{day:02d}"
                         is_today = (self._year == today.year and self._month == today.month and day == today.day)
-                        is_sunday = col == 0  # Sunday-first layout
+                        is_sunday = col == 0   # Sunday-first layout
+                        is_saturday = col == 6
                         holiday_name = holidays.get(day)
                         cell = DayCell(
                             iso, day, items_by_date.get(iso, []),
                             is_today=is_today,
                             is_sunday=is_sunday,
+                            is_saturday=is_saturday,
                             holiday_name=holiday_name,
                         )
                         cell.double_clicked.connect(self.date_double_clicked)
