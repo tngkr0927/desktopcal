@@ -126,6 +126,10 @@ class MonthlyCalendarWidget(QWidget):
     def month(self) -> int:
         return self._month
 
+    @property
+    def events(self) -> list[dict[str, Any]]:
+        return self._events
+
     def set_month(self, year: int, month: int) -> None:
         self._year = year
         self._month = month

@@ -187,7 +187,9 @@ class MainWindow(QWidget):
 
     def _on_date_action(self, iso_date: str) -> None:
         """Handle double-click on a day cell."""
-        dialog = AddEventDialog(iso_date, self)
+        # Gather existing events for this date
+        existing = [e for e in self._calendar.events if e["date"] == iso_date]
+        dialog = AddEventDialog(iso_date, existing_events=existing, parent=self)
         dialog.exec()
         if dialog.was_accepted:
             self._sync()

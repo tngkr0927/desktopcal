@@ -145,6 +145,25 @@ def create_event(summary: str, date: str, start_time: str | None = None) -> dict
     return service.events().insert(calendarId="primary", body=body).execute()
 
 
+def delete_event(event_id: str) -> None:
+    """Delete a Google Calendar event by ID."""
+    service = _calendar_service()
+    service.events().delete(calendarId="primary", eventId=event_id).execute()
+
+
+def delete_task(task_id: str) -> None:
+    """Delete a Google Task by ID."""
+    service = _tasks_service()
+    tasklists = service.tasklists().list(maxResults=50).execute().get("items", [])
+    for tl in tasklists:
+        try:
+            service.tasks().delete(tasklist=tl["id"], task=task_id).execute()
+            return
+        except HttpError:
+            continue
+    raise RuntimeError(f"Task {task_id} not found in any task list.")
+
+
 def create_task(title: str, date: str) -> dict:
     """Create a Google Task on the default task list.
 
