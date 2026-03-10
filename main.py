@@ -240,15 +240,19 @@ class MainWindow(QWidget):
     # ── Mouse events: drag + resize ──────────────────────────────────────────
 
     def mousePressEvent(self, event: QMouseEvent | None) -> None:
-        if not event or event.button() != Qt.MouseButton.LeftButton:
+        if not event:
             return
 
-        edge = self._edge_at(event.position().toPoint())
-        if edge:
-            self._resize_edge = edge
-            self._drag_pos = event.globalPosition().toPoint()
-            self._resize_origin_geo = self.geometry()
-        else:
+        # Left-click: edge resize only
+        if event.button() == Qt.MouseButton.LeftButton:
+            edge = self._edge_at(event.position().toPoint())
+            if edge:
+                self._resize_edge = edge
+                self._drag_pos = event.globalPosition().toPoint()
+                self._resize_origin_geo = self.geometry()
+
+        # Middle-click (wheel): window drag
+        elif event.button() == Qt.MouseButton.MiddleButton:
             self._resize_edge = None
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
@@ -256,8 +260,8 @@ class MainWindow(QWidget):
         if not event:
             return
 
-        if not (event.buttons() & Qt.MouseButton.LeftButton):
-            # Update cursor shape on hover
+        # Resize cursor on hover (no button pressed)
+        if not (event.buttons() & (Qt.MouseButton.LeftButton | Qt.MouseButton.MiddleButton)):
             edge = self._edge_at(event.position().toPoint())
             cursor_map = {
                 "left": Qt.CursorShape.SizeHorCursor,
@@ -275,9 +279,11 @@ class MainWindow(QWidget):
         if self._drag_pos is None:
             return
 
-        if self._resize_edge:
+        # Left-drag: resize
+        if self._resize_edge and (event.buttons() & Qt.MouseButton.LeftButton):
             self._handle_resize(event.globalPosition().toPoint())
-        else:
+        # Middle-drag: move window
+        elif event.buttons() & Qt.MouseButton.MiddleButton:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
 
     def _handle_resize(self, global_pos: QPoint) -> None:
@@ -304,6 +310,8 @@ class MainWindow(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent | None) -> None:
         if self._resize_edge is not None:
+            self._save_geometry()
+        if event and event.button() == Qt.MouseButton.MiddleButton and self._drag_pos is not None:
             self._save_geometry()
         self._drag_pos = None
         self._resize_edge = None

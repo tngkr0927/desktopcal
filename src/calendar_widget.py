@@ -101,6 +101,12 @@ class DayCell(QFrame):
 
         layout.addStretch()
 
+    def mousePressEvent(self, event: QMouseEvent | None) -> None:
+        if event and event.button() == Qt.MouseButton.MiddleButton:
+            event.ignore()  # Pass to parent for window drag
+            return
+        super().mousePressEvent(event)
+
     def mouseDoubleClickEvent(self, event: QMouseEvent | None) -> None:
         self.double_clicked.emit(self._iso_date)
 
@@ -115,6 +121,12 @@ class EmptyCell(QFrame):
         self.setStyleSheet(
             "background-color: rgba(20, 20, 20, 0.35); border: 1px solid rgba(255,255,255,0.05); border-radius: 4px;"
         )
+
+    def mousePressEvent(self, event: QMouseEvent | None) -> None:
+        if event and event.button() == Qt.MouseButton.MiddleButton:
+            event.ignore()
+            return
+        super().mousePressEvent(event)
 
 
 class MonthlyCalendarWidget(QWidget):
@@ -180,6 +192,12 @@ class MonthlyCalendarWidget(QWidget):
             self._month = 1
         else:
             self._month += 1
+
+    def mousePressEvent(self, event: QMouseEvent | None) -> None:
+        if event and event.button() == Qt.MouseButton.MiddleButton:
+            event.ignore()
+            return
+        super().mousePressEvent(event)
 
     # ---- internal ----------------------------------------------------------
 
