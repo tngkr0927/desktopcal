@@ -272,14 +272,38 @@ class AddEventDialog(QDialog):
 
     def _on_delete(self, ev: dict[str, Any], row_widget: QWidget) -> None:
         """Delete an event after confirmation."""
-        reply = QMessageBox.question(
-            self,
-            "일정 삭제",
-            f"'{ev['summary']}' 을(를) 삭제하시겠습니까?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        msg = QMessageBox(self)
+        msg.setWindowTitle("일정 삭제")
+        msg.setText(f"'{ev['summary']}' 을(를) 삭제하시겠습니까?")
+        msg.setIcon(QMessageBox.Icon.Question)
+
+        btn_yes = msg.addButton("네", QMessageBox.ButtonRole.YesRole)
+        btn_no = msg.addButton("아니요", QMessageBox.ButtonRole.NoRole)
+        msg.setDefaultButton(btn_no)
+
+        msg.setStyleSheet("""
+            QMessageBox {
+                background-color: #2B2B2B;
+            }
+            QMessageBox QLabel {
+                color: #FFFFFF;
+                font-size: 13px;
+            }
+            QPushButton {
+                border-radius: 4px;
+                padding: 6px 20px;
+                font-size: 12px;
+                font-weight: bold;
+                min-width: 70px;
+            }
+        """)
+        btn_yes.setStyleSheet("background-color: #EF5350; color: #FFFFFF;")
+        btn_no.setStyleSheet("background-color: #616161; color: #FFFFFF;")
+        btn_yes.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_no.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        msg.exec()
+        if msg.clickedButton() != btn_yes:
             return
 
         try:
