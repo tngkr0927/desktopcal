@@ -188,6 +188,46 @@ def delete_event(event_id: str) -> None:
     service.events().delete(calendarId="primary", eventId=event_id).execute()
 
 
+def update_event(
+    event_id: str, summary: str, date: str, start_time: str | None = None
+) -> dict:
+    """Update an existing Google Calendar event.
+
+    Args:
+        event_id: The event ID to update.
+        summary: New event title.
+        date: ISO date string, e.g. "2026-03-15".
+        start_time: Optional HH:MM (24h). If omitted the event becomes all-day.
+    """
+    service = _calendar_service()
+    if start_time:
+        start_dt = datetime.fromisoformat(f"{date}T{start_time}:00")
+        end_dt = start_dt + timedelta(hours=1)
+        body = {
+            "summary": summary,
+            "start": {
+                "dateTime": start_dt.isoformat(),
+                "timeZone": _local_tz_name(),
+            },
+            "end": {
+                "dateTime": end_dt.isoformat(),
+                "timeZone": _local_tz_name(),
+            },
+        }
+    else:
+        end_date = (datetime.fromisoformat(date) + timedelta(days=1)).strftime("%Y-%m-%d")
+        body = {
+            "summary": summary,
+            "start": {"date": date},
+            "end": {"date": end_date},
+        }
+    return (
+        service.events()
+        .update(calendarId="primary", eventId=event_id, body=body)
+        .execute()
+    )
+
+
 def delete_task(task_id: str) -> None:
     """Delete a Google Task by ID."""
     service = _tasks_service()
@@ -196,6 +236,31 @@ def delete_task(task_id: str) -> None:
         try:
             service.tasks().delete(tasklist=tl["id"], task=task_id).execute()
             return
+        except HttpError:
+            continue
+    raise RuntimeError(f"Task {task_id} not found in any task list.")
+
+
+def update_task(task_id: str, title: str, date: str) -> dict:
+    """Update an existing Google Task.
+
+    Args:
+        task_id: The task ID to update.
+        title: New task title.
+        date: ISO date string, e.g. "2026-03-15".
+    """
+    service = _tasks_service()
+    tasklists = service.tasklists().list(maxResults=50).execute().get("items", [])
+    for tl in tasklists:
+        try:
+            task = service.tasks().get(tasklist=tl["id"], task=task_id).execute()
+            task["title"] = title
+            task["due"] = f"{date}T00:00:00.000Z"
+            return (
+                service.tasks()
+                .update(tasklist=tl["id"], task=task_id, body=task)
+                .execute()
+            )
         except HttpError:
             continue
     raise RuntimeError(f"Task {task_id} not found in any task list.")

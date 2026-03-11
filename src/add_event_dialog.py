@@ -72,6 +72,15 @@ QPushButton#btnDelete {
 QPushButton#btnDelete:hover {
     background-color: #F44336;
 }
+QPushButton#btnEdit {
+    background-color: #4FC3F7;
+    color: #000;
+    padding: 2px 10px;
+    font-size: 11px;
+}
+QPushButton#btnEdit:hover {
+    background-color: #29B6F6;
+}
 QScrollArea {
     border: none;
     background: transparent;
@@ -118,6 +127,7 @@ class AddEventDialog(QDialog):
         self._accepted = False
         self._changed = False
         self._existing = existing_events or []
+        self._editing_event: dict[str, Any] | None = None
 
         self.setWindowTitle(f"일정 관리 — {iso_date}")
         self.setFixedWidth(420)
@@ -157,10 +167,10 @@ class AddEventDialog(QDialog):
             layout.addWidget(scroll)
 
         # ── Separator ──
-        sep_label = QLabel("새 일정 추가")
-        sep_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        sep_label.setStyleSheet("color: #4FC3F7; border: none; margin-top: 4px;")
-        layout.addWidget(sep_label)
+        self._form_label = QLabel("새 일정 추가")
+        self._form_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self._form_label.setStyleSheet("color: #4FC3F7; border: none; margin-top: 4px;")
+        layout.addWidget(self._form_label)
 
         # Type selector
         type_row = QHBoxLayout()
@@ -218,10 +228,10 @@ class AddEventDialog(QDialog):
         btn_cancel.clicked.connect(self._on_close)
         btn_row.addWidget(btn_cancel)
 
-        btn_ok = QPushButton("추가")
-        btn_ok.setObjectName("btnOk")
-        btn_ok.clicked.connect(self._on_ok)
-        btn_row.addWidget(btn_ok)
+        self._btn_ok = QPushButton("추가")
+        self._btn_ok.setObjectName("btnOk")
+        self._btn_ok.clicked.connect(self._on_ok)
+        btn_row.addWidget(self._btn_ok)
         layout.addLayout(btn_row)
 
         # Adjust dialog height based on content
@@ -243,6 +253,13 @@ class AddEventDialog(QDialog):
         summary_label.setStyleSheet("color: #E0E0E0; border: none; background: transparent;")
         summary_label.setFont(QFont("Segoe UI", 10))
         row_layout.addWidget(summary_label, stretch=1)
+
+        btn_edit = QPushButton("수정")
+        btn_edit.setObjectName("btnEdit")
+        btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_edit.setFixedWidth(50)
+        btn_edit.clicked.connect(lambda _, e=ev: self._on_edit(e))
+        row_layout.addWidget(btn_edit)
 
         btn_del = QPushButton("삭제")
         btn_del.setObjectName("btnDelete")
@@ -269,6 +286,41 @@ class AddEventDialog(QDialog):
         self._time_edit.setVisible(is_calendar and is_manual)
         self._time_label.setVisible(is_calendar)
         self._manual_check.setVisible(is_calendar)
+
+    def _on_edit(self, ev: dict[str, Any]) -> None:
+        """Populate the form with the event data for editing."""
+        self._editing_event = ev
+        self._form_label.setText("일정 수정")
+        self._btn_ok.setText("수정")
+
+        # Fill title
+        self._title_edit.setText(ev["summary"])
+
+        # Set type
+        if ev["source"] == "tasks":
+            self._type_combo.setCurrentIndex(1)
+        else:
+            self._type_combo.setCurrentIndex(0)
+            time_str = ev.get("time", "")
+            if time_str:
+                self._manual_check.setChecked(True)
+                self._time_edit.setText(time_str)
+            else:
+                self._manual_check.setChecked(False)
+                self._time_combo.setCurrentIndex(0)  # 종일
+
+        self._title_edit.setFocus()
+
+    def _cancel_edit(self) -> None:
+        """Reset form back to add mode."""
+        self._editing_event = None
+        self._form_label.setText("새 일정 추가")
+        self._btn_ok.setText("추가")
+        self._title_edit.clear()
+        self._type_combo.setCurrentIndex(0)
+        self._time_combo.setCurrentIndex(0)
+        self._manual_check.setChecked(False)
+        self._time_edit.clear()
 
     def _on_delete(self, ev: dict[str, Any], row_widget: QWidget) -> None:
         """Delete an event after confirmation."""
@@ -332,13 +384,23 @@ class AddEventDialog(QDialog):
                 time_text = self._time_combo.currentText()
 
         try:
-            if is_calendar:
-                google_service.create_event(title, self._iso_date, time_text)
+            if self._editing_event:
+                ev = self._editing_event
+                if ev["source"] == "calendar":
+                    google_service.update_event(ev["id"], title, self._iso_date, time_text)
+                else:
+                    google_service.update_task(ev["id"], title, self._iso_date)
+                self._changed = True
+                self._cancel_edit()
+                self.accept()
             else:
-                google_service.create_task(title, self._iso_date)
-            self._accepted = True
-            self._changed = True
-            self.accept()
+                if is_calendar:
+                    google_service.create_event(title, self._iso_date, time_text)
+                else:
+                    google_service.create_task(title, self._iso_date)
+                self._accepted = True
+                self._changed = True
+                self.accept()
         except Exception as exc:
             QMessageBox.critical(self, "API 오류", f"Google API 호출 실패:\n{exc}")
 
