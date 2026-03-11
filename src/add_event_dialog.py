@@ -74,7 +74,7 @@ QPushButton#btnDelete:hover {
 }
 QPushButton#btnEdit {
     background-color: #4FC3F7;
-    color: #000;
+    color: #FFFFFF;
     padding: 2px 10px;
     font-size: 11px;
 }
