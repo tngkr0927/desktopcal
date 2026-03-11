@@ -261,11 +261,11 @@ class MonthlyCalendarWidget(QWidget):
         self._btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_close.clicked.connect(self.close_clicked)
 
+        h_layout.addStretch()
         h_layout.addWidget(self._btn_prev)
-        h_layout.addStretch()
         h_layout.addWidget(self._title)
-        h_layout.addStretch()
         h_layout.addWidget(self._btn_next)
+        h_layout.addStretch()
         h_layout.addWidget(self._btn_sync)
         h_layout.addWidget(self._btn_close)
 
