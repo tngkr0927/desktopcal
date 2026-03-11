@@ -141,6 +141,7 @@ class MonthlyCalendarWidget(QWidget):
 
     date_double_clicked = pyqtSignal(str)
     nav_clicked = pyqtSignal()
+    sync_clicked = pyqtSignal()
     close_clicked = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None):
@@ -235,6 +236,19 @@ class MonthlyCalendarWidget(QWidget):
         self._btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_next.clicked.connect(self._on_next)
 
+        sync_style = """
+            QPushButton {
+                color: #888888; background: transparent; border: none;
+                font-size: 13px; padding: 4px 8px;
+            }
+            QPushButton:hover { color: #4FC3F7; }
+        """
+        self._btn_sync = QPushButton("⟳")
+        self._btn_sync.setStyleSheet(sync_style)
+        self._btn_sync.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_sync.setToolTip("동기화")
+        self._btn_sync.clicked.connect(self.sync_clicked)
+
         close_style = """
             QPushButton {
                 color: #888888; background: transparent; border: none;
@@ -252,6 +266,7 @@ class MonthlyCalendarWidget(QWidget):
         h_layout.addWidget(self._title)
         h_layout.addStretch()
         h_layout.addWidget(self._btn_next)
+        h_layout.addWidget(self._btn_sync)
         h_layout.addWidget(self._btn_close)
 
         self._outer.addWidget(header)

@@ -459,6 +459,85 @@ class DayCell(QFrame):
 
 ---
 
+## 13. 종일 일정이 리스트에 안 나오는 버그 수정
+
+### 문제
+- 종일 이벤트를 추가해도 달력에 표시되지 않음
+
+### 원인
+`create_event`에서 종일 이벤트 생성 시 `end.date`를 `start.date`와 **동일하게** 설정:
+```python
+# 버그 코드
+body = {
+    "start": {"date": "2026-03-11"},
+    "end":   {"date": "2026-03-11"},  # ← 같은 날!
+}
+```
+
+Google Calendar API에서 종일 이벤트의 `end.date`는 **exclusive(미포함)**:
+```
+normalizer: end_date = 2026-03-11 - 1일 = 2026-03-10
+while(2026-03-11 <= 2026-03-10) → False → 결과 0건!
+```
+
+### 해결
+```python
+end_date = (datetime.fromisoformat(date) + timedelta(days=1)).strftime("%Y-%m-%d")
+body = {
+    "start": {"date": date},           # "2026-03-11"
+    "end":   {"date": end_date},        # "2026-03-12" (exclusive)
+}
+```
+
+### 배운 점
+- **Google Calendar API 규칙**: 종일 이벤트의 `end.date`는 exclusive. 1일짜리 이벤트면 end = start + 1
+- 데이터를 **읽을 때**(normalizer)와 **쓸 때**(create)의 규칙이 일치해야 함
+- 이 버그는 `_normalize_calendar_events`에서 이미 exclusive를 올바르게 처리하고 있었지만, `create_event`에서 규칙을 안 지킨 것
+
+---
+
+## 14. 동기화 버튼 추가 및 동기화 큐잉
+
+### 문제
+- 일정 추가/삭제 후 화면이 갱신 안 됨 (이전 동기화 워커 실행 중이면 새 동기화가 무시됨)
+- 수동 동기화 버튼이 없어서 사용자가 최신 데이터를 즉시 가져올 방법이 없음
+
+### 해결 1: 동기화 큐잉 (`_sync_pending`)
+```python
+def _sync(self):
+    if self._sync_worker is not None and self._sync_worker.isRunning():
+        self._sync_pending = True  # 나중에 실행하도록 예약
+        return
+    ...
+
+def _on_sync_done(self, year, month, events):
+    ...
+    if self._sync_pending:
+        self._sync_pending = False
+        self._sync()  # 대기 중이던 동기화 실행
+```
+
+**왜?** 기존에는 워커 실행 중 `_sync()` 호출을 그냥 무시(`return`)했음. 일정 추가 직후 호출되는 `_sync()`가 씹히면 새 이벤트가 안 보임.
+
+### 해결 2: 동기화 버튼 (⟳)
+```python
+# calendar_widget.py
+sync_clicked = pyqtSignal()
+
+self._btn_sync = QPushButton("⟳")
+self._btn_sync.clicked.connect(self.sync_clicked)
+
+# main.py
+self._calendar.sync_clicked.connect(self._sync)
+```
+헤더의 `▶` 버튼과 `✕` 버튼 사이에 `⟳` 버튼 배치.
+
+### 배운 점
+- **큐잉 패턴**: "지금 못 하면 나중에 해" — `_sync_pending` 플래그로 간단 구현
+- 시그널/슬롯 연결만으로 UI 버튼 → 비즈니스 로직 연결 가능
+
+---
+
 ### 데이터 흐름
 ```
 Google Calendar/Tasks API

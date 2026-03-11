@@ -172,10 +172,12 @@ def create_event(summary: str, date: str, start_time: str | None = None) -> dict
             "end": {"dateTime": end_dt.isoformat(), "timeZone": "Asia/Seoul"},
         }
     else:
+        # Google all-day end date is exclusive, so +1 day
+        end_date = (datetime.fromisoformat(date) + timedelta(days=1)).strftime("%Y-%m-%d")
         body = {
             "summary": summary,
             "start": {"date": date},
-            "end": {"date": date},
+            "end": {"date": end_date},
         }
     return service.events().insert(calendarId="primary", body=body).execute()
 
