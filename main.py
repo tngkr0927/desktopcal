@@ -87,6 +87,7 @@ class MainWindow(QWidget):
 
         # Sync state
         self._sync_worker: _SyncWorker | None = None
+        self._sync_pending = False
 
         # Navigation debounce timer
         self._nav_timer = QTimer(self)
@@ -162,9 +163,11 @@ class MainWindow(QWidget):
     def _sync(self) -> None:
         """Fetch events+tasks for the currently displayed month in background."""
         if self._sync_worker is not None and self._sync_worker.isRunning():
-            log.info("Sync already in progress — skipping")
+            self._sync_pending = True
+            log.info("Sync already in progress — queued for retry")
             return
 
+        self._sync_pending = False
         year, month = self._calendar.year, self._calendar.month
         log.info("Syncing %d-%02d …", year, month)
 
@@ -178,6 +181,11 @@ class MainWindow(QWidget):
         if self._calendar.year == year and self._calendar.month == month:
             self._calendar.set_events(events)
             log.info("Loaded %d items for %d-%02d", len(events), year, month)
+
+        # If a sync was requested while we were busy, run it now
+        if self._sync_pending:
+            self._sync_pending = False
+            self._sync()
 
     # ── Slots ────────────────────────────────────────────────────────────────
 
