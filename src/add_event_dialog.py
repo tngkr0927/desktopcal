@@ -206,7 +206,7 @@ class AddEventDialog(QDialog):
         self._time_row.addWidget(self._time_combo)
 
         self._time_edit = QLineEdit()
-        self._time_edit.setPlaceholderText("HH:MM")
+        self._time_edit.setInputMask("99:99")
         self._time_edit.setMaximumWidth(140)
         self._time_edit.setVisible(False)
         self._time_row.addWidget(self._time_edit)
