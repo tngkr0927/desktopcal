@@ -287,24 +287,56 @@ class AddEventDialog(QDialog):
         self._time_label.setVisible(is_calendar)
         self._manual_check.setVisible(is_calendar)
 
+    @staticmethod
+    def _parse_summary(summary: str, source: str) -> tuple[str, str]:
+        """Extract (title, time_str) from a display summary.
+
+        Timed calendar events look like '[HH:MM] title'.
+        Tasks look like '[x] title' or '[ ] title'.
+        All-day events have no prefix.
+        """
+        import re
+
+        if source == "calendar":
+            m = re.match(r"^\[(\d{2}:\d{2})\]\s*(.*)$", summary)
+            if m:
+                return m.group(2), m.group(1)
+            # [연속] prefix for multi-day continuation
+            m2 = re.match(r"^\[연속\]\s*(.*)$", summary)
+            if m2:
+                return m2.group(1), ""
+        elif source == "tasks":
+            m = re.match(r"^\[[ x]\]\s*(.*)$", summary)
+            if m:
+                return m.group(1), ""
+
+        return summary, ""
+
     def _on_edit(self, ev: dict[str, Any]) -> None:
         """Populate the form with the event data for editing."""
         self._editing_event = ev
         self._form_label.setText("일정 수정")
         self._btn_ok.setText("수정")
 
+        title, time_str = self._parse_summary(ev["summary"], ev["source"])
+
         # Fill title
-        self._title_edit.setText(ev["summary"])
+        self._title_edit.setText(title)
 
         # Set type
         if ev["source"] == "tasks":
             self._type_combo.setCurrentIndex(1)
         else:
             self._type_combo.setCurrentIndex(0)
-            time_str = ev.get("time", "")
             if time_str:
-                self._manual_check.setChecked(True)
-                self._time_edit.setText(time_str)
+                # Try to find the time in the combo box first
+                idx = self._time_combo.findText(time_str)
+                if idx >= 0:
+                    self._manual_check.setChecked(False)
+                    self._time_combo.setCurrentIndex(idx)
+                else:
+                    self._manual_check.setChecked(True)
+                    self._time_edit.setText(time_str)
             else:
                 self._manual_check.setChecked(False)
                 self._time_combo.setCurrentIndex(0)  # 종일
