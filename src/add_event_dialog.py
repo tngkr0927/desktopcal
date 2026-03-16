@@ -192,16 +192,11 @@ class AddEventDialog(QDialog):
         title_row.addWidget(self._title_edit)
         layout.addLayout(title_row)
 
-        # Time row: 종일 checkbox, time dropdown, manual input checkbox
+        # Time row: label, dropdown, manual check, 종일 check (at end)
         self._time_row = QHBoxLayout()
         self._time_label = QLabel("시간")
         self._time_label.setFixedWidth(40)
         self._time_row.addWidget(self._time_label)
-
-        self._allday_check = QCheckBox("종일")
-        self._allday_check.setChecked(False)
-        self._allday_check.toggled.connect(self._on_allday_toggled)
-        self._time_row.addWidget(self._allday_check)
 
         self._time_combo = QComboBox()
         # Only timed options (no empty/all-day entry)
@@ -219,6 +214,13 @@ class AddEventDialog(QDialog):
         self._manual_check = QCheckBox("직접입력")
         self._manual_check.toggled.connect(self._on_manual_toggled)
         self._time_row.addWidget(self._manual_check)
+
+        self._time_row.addStretch()
+
+        self._allday_check = QCheckBox("종일")
+        self._allday_check.setChecked(False)
+        self._allday_check.toggled.connect(self._on_allday_toggled)
+        self._time_row.addWidget(self._allday_check)
 
         layout.addLayout(self._time_row)
 
