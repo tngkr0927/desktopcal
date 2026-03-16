@@ -207,11 +207,11 @@ def update_event(
             "summary": summary,
             "start": {
                 "dateTime": start_dt.isoformat(),
-                "timeZone": _local_tz_name(),
+                "timeZone": "Asia/Seoul",
             },
             "end": {
                 "dateTime": end_dt.isoformat(),
-                "timeZone": _local_tz_name(),
+                "timeZone": "Asia/Seoul",
             },
         }
     else:

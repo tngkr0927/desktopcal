@@ -192,17 +192,22 @@ class AddEventDialog(QDialog):
         title_row.addWidget(self._title_edit)
         layout.addLayout(title_row)
 
-        # Time dropdown (5-min intervals) + manual input checkbox
+        # Time row: 종일 checkbox, time dropdown, manual input checkbox
         self._time_row = QHBoxLayout()
         self._time_label = QLabel("시간")
         self._time_label.setFixedWidth(40)
         self._time_row.addWidget(self._time_label)
 
+        self._allday_check = QCheckBox("종일")
+        self._allday_check.setChecked(False)
+        self._allday_check.toggled.connect(self._on_allday_toggled)
+        self._time_row.addWidget(self._allday_check)
+
         self._time_combo = QComboBox()
-        self._time_combo.addItems(_build_time_options())
+        # Only timed options (no empty/all-day entry)
+        self._time_combo.addItems(_build_time_options()[1:])
         self._time_combo.setEditable(False)
         self._time_combo.setMaximumWidth(140)
-        self._time_combo.setItemText(0, "종일")
         self._time_row.addWidget(self._time_combo)
 
         self._time_edit = QLineEdit()
@@ -272,20 +277,29 @@ class AddEventDialog(QDialog):
 
     # ── Slots ──
 
+    def _on_allday_toggled(self, checked: bool) -> None:
+        """Toggle time inputs when 종일 is checked."""
+        self._time_combo.setVisible(not checked and not self._manual_check.isChecked())
+        self._time_edit.setVisible(not checked and self._manual_check.isChecked())
+        self._manual_check.setVisible(not checked)
+
     def _on_manual_toggled(self, checked: bool) -> None:
         """Switch between dropdown and manual text input for time."""
-        self._time_combo.setVisible(not checked)
-        self._time_edit.setVisible(checked)
-        if checked:
+        allday = self._allday_check.isChecked()
+        self._time_combo.setVisible(not checked and not allday)
+        self._time_edit.setVisible(checked and not allday)
+        if checked and not allday:
             self._time_edit.setFocus()
 
     def _on_type_changed(self, index: int) -> None:
         is_calendar = index == 0
+        allday = self._allday_check.isChecked()
         is_manual = self._manual_check.isChecked()
-        self._time_combo.setVisible(is_calendar and not is_manual)
-        self._time_edit.setVisible(is_calendar and is_manual)
+        self._time_combo.setVisible(is_calendar and not allday and not is_manual)
+        self._time_edit.setVisible(is_calendar and not allday and is_manual)
         self._time_label.setVisible(is_calendar)
-        self._manual_check.setVisible(is_calendar)
+        self._allday_check.setVisible(is_calendar)
+        self._manual_check.setVisible(is_calendar and not allday)
 
     @staticmethod
     def _parse_summary(summary: str, source: str) -> tuple[str, str]:
@@ -329,6 +343,7 @@ class AddEventDialog(QDialog):
         else:
             self._type_combo.setCurrentIndex(0)
             if time_str:
+                self._allday_check.setChecked(False)
                 # Try to find the time in the combo box first
                 idx = self._time_combo.findText(time_str)
                 if idx >= 0:
@@ -338,8 +353,8 @@ class AddEventDialog(QDialog):
                     self._manual_check.setChecked(True)
                     self._time_edit.setText(time_str)
             else:
+                self._allday_check.setChecked(True)
                 self._manual_check.setChecked(False)
-                self._time_combo.setCurrentIndex(0)  # 종일
 
         self._title_edit.setFocus()
 
@@ -350,6 +365,7 @@ class AddEventDialog(QDialog):
         self._btn_ok.setText("추가")
         self._title_edit.clear()
         self._type_combo.setCurrentIndex(0)
+        self._allday_check.setChecked(False)
         self._time_combo.setCurrentIndex(0)
         self._manual_check.setChecked(False)
         self._time_edit.clear()
@@ -409,10 +425,10 @@ class AddEventDialog(QDialog):
 
         is_calendar = self._type_combo.currentIndex() == 0
         time_text = None
-        if is_calendar:
+        if is_calendar and not self._allday_check.isChecked():
             if self._manual_check.isChecked():
                 time_text = self._time_edit.text().strip() or None
-            elif self._time_combo.currentIndex() > 0:
+            else:
                 time_text = self._time_combo.currentText()
 
         try:
