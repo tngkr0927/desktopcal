@@ -154,6 +154,25 @@ def fetch_all(year: int, month: int) -> list[dict[str, Any]]:
 # Write — Create
 # ---------------------------------------------------------------------------
 
+def _retry_on_auth_error(fn):
+    """Decorator: on 401/403 invalidate cached services and retry once."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except HttpError as e:
+            if e.resp.status in (401, 403):
+                log.info("Auth error — refreshing credentials and retrying")
+                invalidate_services()
+                return fn(*args, **kwargs)
+            raise
+
+    return wrapper
+
+
+@_retry_on_auth_error
 def create_event(summary: str, date: str, start_time: str | None = None) -> dict:
     """Create a Google Calendar event.
 
@@ -182,12 +201,14 @@ def create_event(summary: str, date: str, start_time: str | None = None) -> dict
     return service.events().insert(calendarId="primary", body=body).execute()
 
 
+@_retry_on_auth_error
 def delete_event(event_id: str) -> None:
     """Delete a Google Calendar event by ID."""
     service = _calendar_service()
     service.events().delete(calendarId="primary", eventId=event_id).execute()
 
 
+@_retry_on_auth_error
 def update_event(
     event_id: str, summary: str, date: str, start_time: str | None = None
 ) -> dict:
@@ -228,6 +249,7 @@ def update_event(
     )
 
 
+@_retry_on_auth_error
 def delete_task(task_id: str) -> None:
     """Delete a Google Task by ID."""
     service = _tasks_service()
@@ -241,6 +263,7 @@ def delete_task(task_id: str) -> None:
     raise RuntimeError(f"Task {task_id} not found in any task list.")
 
 
+@_retry_on_auth_error
 def update_task(task_id: str, title: str, date: str) -> dict:
     """Update an existing Google Task.
 
@@ -266,6 +289,7 @@ def update_task(task_id: str, title: str, date: str) -> dict:
     raise RuntimeError(f"Task {task_id} not found in any task list.")
 
 
+@_retry_on_auth_error
 def create_task(title: str, date: str) -> dict:
     """Create a Google Task on the default task list.
 

@@ -41,8 +41,12 @@ def get_credentials() -> Credentials:
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except Exception:
+                # Refresh token revoked/expired — fall through to full re-auth
+                creds = None
+        if creds is None or not creds.valid:
             if not CREDENTIALS_PATH.exists():
                 raise FileNotFoundError(
                     f"credentials.json not found at {CREDENTIALS_PATH}. "
