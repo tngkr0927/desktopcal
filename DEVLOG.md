@@ -550,3 +550,200 @@ add_event_dialog.py (추가/삭제 UI)
         ↓ API 호출
 google_service.py → Google API
 ```
+
+---
+
+## 15. 토요일 날짜 파란색 표시
+
+### 문제
+- 일요일은 빨간색으로 표시했지만, 토요일도 평일과 동일한 흰색이라 구분이 안 됨
+
+### 해결
+```python
+# DayCell 색상 우선순위
+if is_today:
+    color = "#4FC3F7"       # 오늘: 밝은 파란색
+elif is_sunday or holiday_name:
+    color = "#FF6B6B"       # 일요일/공휴일: 빨간색
+elif is_saturday:
+    color = "#5B9BD5"       # 토요일: 파란색
+else:
+    color = "#E0E0E0"       # 평일: 밝은 회색
+```
+
+### 배운 점
+- if-elif 체인의 **순서**가 우선순위를 결정. 토요일이면서 공휴일이면 빨간색이 적용됨
+
+---
+
+## 16. 삭제 확인 다이얼로그 스타일 개선
+
+### 문제
+- 삭제 확인 팝업의 Yes/No 버튼이 어두운 배경에 검은 글씨라 안 보임
+- 영문 Yes/No가 한국어 UI와 어울리지 않음
+
+### 해결
+```python
+msg = QMessageBox(self)
+btn_yes = msg.addButton("네", QMessageBox.ButtonRole.YesRole)
+btn_no = msg.addButton("아니요", QMessageBox.ButtonRole.NoRole)
+btn_yes.setStyleSheet("background-color: #EF5350; color: #FFFFFF;")
+btn_no.setStyleSheet("background-color: #616161; color: #FFFFFF;")
+```
+
+### 배운 점
+- `QMessageBox.addButton(text, role)`: 기본 버튼 대신 커스텀 텍스트/스타일 버튼 추가 가능
+- `ButtonRole.YesRole`/`NoRole`: Qt가 버튼 동작(기본 선택 등)을 결정하는 데 사용하는 역할 값
+
+---
+
+## 17. 일정 수정 기능 추가
+
+### 문제
+- 일정 추가/삭제만 가능하고, 기존 일정의 제목이나 시간을 수정할 수 없었음
+
+### 해결
+
+#### 17-1. Google API 업데이트 함수 (`google_service.py`)
+```python
+@_retry_on_auth_error
+def update_event(event_id, summary, date, start_time=None):
+    body = {"summary": summary, "start": {...}, "end": {...}}
+    service.events().update(calendarId="primary", eventId=event_id, body=body).execute()
+
+@_retry_on_auth_error
+def update_task(task_id, title, date):
+    # 모든 tasklist를 순회하여 해당 task를 찾아 업데이트
+    for tl in tasklists:
+        task = service.tasks().get(tasklist=tl["id"], task=task_id).execute()
+        task["title"] = title
+        service.tasks().update(tasklist=tl["id"], task=task_id, body=task).execute()
+```
+
+#### 17-2. 다이얼로그에 수정 모드 추가 (`add_event_dialog.py`)
+```python
+def _on_edit(self, ev):
+    self._editing_event = ev
+    self._form_label.setText("일정 수정")
+    self._btn_ok.setText("수정")
+    title, time_str = self._parse_summary(ev["summary"], ev["source"])
+    self._title_edit.setText(title)
+    # 시간 드롭다운/입력 필드에도 기존 값 세팅
+```
+
+#### 17-3. summary에서 제목/시간 파싱
+```python
+@staticmethod
+def _parse_summary(summary, source):
+    if source == "calendar":
+        m = re.match(r"^\[(\d{2}:\d{2})\]\s*(.*)$", summary)
+        if m:
+            return m.group(2), m.group(1)  # (title, time)
+    elif source == "tasks":
+        m = re.match(r"^\[[ x]\]\s*(.*)$", summary)
+        if m:
+            return m.group(1), ""
+    return summary, ""
+```
+
+### 배운 점
+- **상태 기반 UI**: `_editing_event`가 `None`이면 추가 모드, 값이 있으면 수정 모드. 같은 폼을 두 모드에서 재활용
+- **정규식으로 파싱**: `[HH:MM] 제목` 형태에서 시간과 제목을 분리. `re.match`는 문자열 시작부터 매칭
+- Tasks API는 event ID로 직접 접근이 안 되므로, 모든 tasklist를 순회해서 찾아야 함
+
+---
+
+## 18. 종일 체크박스로 UI 개선
+
+### 문제
+- 시간 드롭다운에 "종일" 옵션이 포함되어 있어서 직관적이지 않음
+- 종일 일정을 만들려면 스크롤해서 빈 항목을 찾아야 함
+
+### 해결
+```python
+# 시간 행 구성: 시간라벨 | 드롭다운 | 직접입력체크 | (스트레치) | 종일체크
+self._allday_check = QCheckBox("종일")
+self._allday_check.toggled.connect(self._on_allday_toggled)
+
+def _on_allday_toggled(self, checked):
+    self._time_combo.setVisible(not checked and not self._manual_check.isChecked())
+    self._time_edit.setVisible(not checked and self._manual_check.isChecked())
+    self._manual_check.setVisible(not checked)
+```
+
+### 배운 점
+- **토글 가시성 매트릭스**: 3개의 체크박스/콤보 상태가 서로 영향을 미칠 때, 각 콜백에서 전체 가시성을 재계산해야 함
+- `QLineEdit.setInputMask("99:99")`: 시간 입력 시 콜론이 자동으로 채워져서 형식 오류 방지
+
+---
+
+## 19. OAuth 토큰 만료 대응 및 자동 재인증
+
+### 문제
+- 일정 시간이 지나면 "invalid_grant" 오류로 인증 재요구
+- API 호출 실패 시 복구 없이 그대로 에러 발생
+
+### 원인
+1. Google Cloud Console에서 OAuth 동의 화면이 **"테스트" 모드**이면 refresh token이 **7일 후 만료**
+2. Refresh token이 만료/취소되었을 때 복구 로직이 없었음
+3. API 쓰기 작업(create, delete, update) 시 401/403 에러 처리 없었음
+
+### 해결 1: auth.py — refresh 실패 시 재인증 fallback
+```python
+if creds and creds.expired and creds.refresh_token:
+    try:
+        creds.refresh(Request())
+    except Exception:
+        creds = None  # refresh 실패 → 전체 재인증으로 fallback
+
+if creds is None or not creds.valid:
+    flow = InstalledAppFlow.from_client_secrets_file(...)
+    creds = flow.run_local_server(
+        port=0,
+        access_type="offline",   # 오프라인 접근 요청 → refresh token 발급
+        prompt="consent",        # 항상 동의 화면 표시 → 새 refresh token 보장
+    )
+```
+
+### 해결 2: google_service.py — 쓰기 작업 자동 재시도
+```python
+def _retry_on_auth_error(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except HttpError as e:
+            if e.resp.status in (401, 403):
+                invalidate_services()  # 서비스 캐시 무효화
+                return fn(*args, **kwargs)  # 새 credentials로 재시도
+            raise
+    return wrapper
+```
+
+### 해결 3: Google Cloud Console 설정 (사용자 조치)
+| 설정 | 테스트 모드 | 프로덕션 모드 |
+|------|-----------|-------------|
+| Refresh token 수명 | 7일 | 무기한 |
+| 사용 가능 유저 | 등록된 테스트 유저만 | 모든 Google 계정 |
+| 전환 방법 | - | OAuth 동의 화면 → "앱 게시" 클릭 |
+
+### 핵심 개념: OAuth 2.0 토큰 흐름
+```
+최초 인증 → Authorization Code → Access Token (1시간) + Refresh Token (장기)
+                                       ↓ 만료
+                                  Refresh Token으로 새 Access Token 발급
+                                       ↓ Refresh Token 만료 (테스트 모드: 7일)
+                                  전체 재인증 필요 (브라우저 열림)
+```
+
+### OAuth 파라미터 설명
+| 파라미터 | 값 | 효과 |
+|----------|-----|------|
+| `access_type` | `"offline"` | Refresh token을 발급받음. 없으면 access token만 받아서 1시간 후 만료 |
+| `prompt` | `"consent"` | 항상 동의 화면을 표시하여 새로운 refresh token을 보장. 이전 token이 취소되어도 새로 발급 |
+
+### 배운 점
+- **Decorator 패턴**: `_retry_on_auth_error`는 모든 쓰기 함수에 동일한 에러 처리를 적용. 코드 중복 제거
+- **OAuth access_type="offline"**: 사용자가 앱을 닫아도 백그라운드에서 토큰 갱신 가능
+- **prompt="consent"**: 기존 refresh token이 있어도 새로 발급. 토큰이 오래되어 실효된 경우에 유용
+- **테스트 vs 프로덕션**: Google Cloud의 "테스트" 모드는 개발 편의를 위한 것이지만, refresh token 7일 제한이 있음
